@@ -223,8 +223,7 @@ typedef enum logic [1:0]
 } bp_fe_misprediction_reason_e;
 
 /*
- * The exception code types. e_instr_addr_misaligned is when the instruction
- * addresses are not aligned. e_itlb_miss is when the instruction has a miss in
+ * The exception code types. e_itlb_miss is when the instruction has a miss in
  * the iTLB. ITLB misses can cause the instruction misaligned. Thus the frontend
  * detects the instruction miss first and then detect whether there is an ITLB
  * miss. e_instruction_access_fault is when the access control is violated.
@@ -232,10 +231,9 @@ typedef enum logic [1:0]
  */
 typedef enum logic [1:0]
 {
-  e_instr_misaligned    = 0
-  ,e_itlb_miss          = 1
-  ,e_instr_access_fault = 2
-  ,e_instr_page_fault   = 3
+  e_itlb_miss           = 0
+  ,e_instr_access_fault = 1
+  ,e_instr_page_fault   = 2
 } bp_fe_exception_code_e;
 
 /*

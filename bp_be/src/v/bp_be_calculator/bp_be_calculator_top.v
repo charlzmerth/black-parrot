@@ -28,7 +28,7 @@ module bp_be_calculator_top
    // Generated parameters
    , localparam cfg_bus_width_lp       = `bp_cfg_bus_width(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p)
    , localparam calc_status_width_lp    = `bp_be_calc_status_width(vaddr_width_p)
-   , localparam exception_width_lp      = `bp_be_exception_width
+   , localparam exc_stage_width_lp      = `bp_be_exc_stage_width
    , localparam mmu_cmd_width_lp        = `bp_be_mmu_cmd_width(vaddr_width_p)
    , localparam csr_cmd_width_lp        = `bp_be_csr_cmd_width
    , localparam mem_resp_width_lp       = `bp_be_mem_resp_width(vaddr_width_p)
@@ -40,7 +40,6 @@ module bp_be_calculator_top
 
    // From BP BE specifications
    , localparam pipe_stage_els_lp = 6
-   , localparam ecode_dec_width_lp = `bp_be_ecode_dec_width
 
    // From RISC-V specifications
    , localparam reg_addr_width_lp = rv64_reg_addr_width_gp
@@ -104,8 +103,8 @@ logic [dword_width_p-1:0] bypass_rs1 , bypass_rs2;
 bp_be_pipe_stage_reg_s                         calc_stage_isd;
 bp_be_pipe_stage_reg_s [pipe_stage_els_lp  :0] calc_stage_n;
 bp_be_pipe_stage_reg_s [pipe_stage_els_lp-1:0] calc_stage_r;
-bp_be_exception_s      [pipe_stage_els_lp  :0] exc_stage_n;
-bp_be_exception_s      [pipe_stage_els_lp-1:0] exc_stage_r;
+bp_be_exc_stage_s      [pipe_stage_els_lp  :0] exc_stage_n;
+bp_be_exc_stage_s      [pipe_stage_els_lp-1:0] exc_stage_r;
 
 bp_be_comp_stage_reg_s [pipe_stage_els_lp  :0] comp_stage_n;
 bp_be_comp_stage_reg_s [pipe_stage_els_lp-1:0] comp_stage_r;
@@ -309,6 +308,11 @@ bp_be_pipe_mul
      ,.csr_data_i(csr_data_i)
      ,.csr_exc_i(csr_exc_i)
 
+     // This should actually be latched (all exceptions come from stage before)
+     // Move with 2-cycle load
+     ,.exception_i(exc_stage_n[3].exc)
+     ,.exception_pc_i(calc_stage_r[2].pc)
+
      ,.mem_resp_i(mem_resp_i)
 
      ,.exc_v_o(pipe_sys_exc_v_lo)
@@ -398,7 +402,7 @@ bsg_dff
 
 // Exception pipeline
 bsg_dff 
- #(.width_p(exception_width_lp*pipe_stage_els_lp)
+ #(.width_p(exc_stage_width_lp*pipe_stage_els_lp)
    ) 
  exc_stage_reg
   (.clk_i(clk_i)
@@ -483,10 +487,10 @@ always_comb
         exc_stage_n[i] = (i == 0) ? '0 : exc_stage_r[i-1];
       end
         // If there are new exceptions, add them to the list
-        // TODO: Fix
-        exc_stage_n[0].fe_nop_v        = ~dispatch_pkt.v;
-        exc_stage_n[0].be_nop_v        = ~dispatch_pkt.v;
-        exc_stage_n[0].me_nop_v        = ~dispatch_pkt.v;
+        exc_stage_n[0].exc.itlb_miss          = reservation_n.decode.itlb_miss;
+        exc_stage_n[0].exc.instr_access_fault = reservation_n.decode.instr_access_fault;
+        exc_stage_n[0].exc.instr_page_fault   = reservation_n.decode.instr_page_fault;
+        exc_stage_n[0].exc.illegal_instr      = reservation_n.decode.illegal_instr;
 
         exc_stage_n[0].roll_v          =                           pipe_mem_miss_v_lo;
         exc_stage_n[1].roll_v          = exc_stage_r[0].roll_v   | pipe_mem_miss_v_lo;
@@ -500,6 +504,13 @@ always_comb
         // on, for instance, fence.i
         exc_stage_n[3].poison_v        = exc_stage_r[2].poison_v | pipe_mem_miss_v_lo | pipe_mem_exc_v_lo
                                           | pipe_sys_miss_v_lo | pipe_sys_exc_v_lo;
+        exc_stage_n[3].exc.dtlb_miss          = mem_resp.tlb_miss_v;
+        exc_stage_n[3].exc.load_misaligned    = mem_resp.load_misaligned;
+        exc_stage_n[3].exc.load_access_fault  = mem_resp.load_access_fault;
+        exc_stage_n[3].exc.load_page_fault    = mem_resp.load_page_fault;
+        exc_stage_n[3].exc.store_misaligned   = mem_resp.store_misaligned;
+        exc_stage_n[3].exc.store_access_fault = mem_resp.store_access_fault;
+        exc_stage_n[3].exc.store_page_fault   = mem_resp.store_page_fault;
   end
 
 assign commit_pkt.v          = calc_stage_r[2].v & ~exc_stage_r[2].poison_v;

@@ -43,6 +43,8 @@ module bp_be_pipe_sys
    , input logic                          csr_exc_i
 
    , input [mem_resp_width_lp-1:0]        mem_resp_i
+   , input [exception_width_lp-1:0]       exception_i
+   , input [vaddr_width_p-1:0]            exception_pc_i
 
    , input [ptw_pkt_width_lp-1:0]         ptw_pkt_i
 
@@ -56,14 +58,16 @@ module bp_be_pipe_sys
 
 bp_be_decode_s    decode;
 bp_be_csr_cmd_s csr_cmd_li, csr_cmd_r, csr_cmd_lo;
-bp_be_mem_resp_s mem_resp;
 rv64_instr_s      instr;
 bp_be_ptw_pkt_s   ptw_pkt;
+bp_be_mem_resp_s  mem_resp;
+bp_be_exception_s exception_cast_i;
 
 assign decode = decode_i;
 assign instr = instr_i;
 assign ptw_pkt = ptw_pkt_i;
 assign mem_resp = mem_resp_i;
+assign exception_cast_i = exception_i;
 
 wire csr_imm_op = decode.fu_op inside {e_csrrwi, e_csrrsi, e_csrrci};
 
@@ -71,7 +75,8 @@ always_comb
   begin
     csr_cmd_li.csr_op   = decode.fu_op;
     csr_cmd_li.csr_addr = instr.fields.itype.imm12;
-    csr_cmd_li.data     = (decode.fu_op == e_itlb_fill) ? pc_i : csr_imm_op ? imm_i : rs1_i;
+    csr_cmd_li.data     = csr_imm_op ? imm_i : rs1_i;
+    csr_cmd_li.exc      = '0;
   end
 
 logic csr_cmd_v_lo;
@@ -94,42 +99,28 @@ always_comb
   begin
     csr_cmd_lo = csr_cmd_r;
 
-    if (mem_resp.tlb_miss_v)
+    if (ptw_pkt.instr_page_fault_v)
       begin
-        csr_cmd_lo.csr_op = e_dtlb_fill;
-        csr_cmd_lo.data = mem_resp.vaddr;
+        csr_cmd_lo.exc.instr_page_fault = 1'b1;
       end
-    else if (ptw_pkt.instr_page_fault_v)
+    else if (ptw_pkt.store_page_fault_v)
       begin
-        csr_cmd_lo.csr_op = e_op_instr_page_fault;
+        csr_cmd_lo.exc.store_page_fault = 1'b1;
       end
-    else if (ptw_pkt.load_page_fault_v | mem_resp.load_page_fault)
+    else if (ptw_pkt.load_page_fault_v)
       begin
-        csr_cmd_lo.csr_op = e_op_load_page_fault;
+        csr_cmd_lo.exc.load_page_fault = 1'b1;
       end
-    else if (ptw_pkt.store_page_fault_v | mem_resp.store_page_fault)
+    else
       begin
-        csr_cmd_lo.csr_op = e_op_store_page_fault;
-      end
-    else if (mem_resp.load_misaligned)
-      begin
-        csr_cmd_lo.csr_op = e_op_load_misaligned;
-      end
-    else if (mem_resp.load_access_fault)
-      begin
-        csr_cmd_lo.csr_op = e_op_load_access_fault;
-      end
-    else if (mem_resp.store_misaligned)
-      begin
-        csr_cmd_lo.csr_op = e_op_store_misaligned;
-      end
-    else if (mem_resp.store_access_fault)
-      begin
-        csr_cmd_lo.csr_op = e_op_store_access_fault;
+        // Override data width vaddr for dtlb fill
+        // Kill exception on ex3
+        csr_cmd_lo.exc = kill_ex3_i ? '0 : exception_cast_i;
+        csr_cmd_lo.data = exception_cast_i.dtlb_miss ? mem_resp.vaddr : exception_cast_i.itlb_miss ? exception_pc_i : csr_cmd_lo.data;
       end
   end
 assign csr_cmd_o = csr_cmd_lo;
-assign csr_cmd_v_o = (csr_cmd_v_lo & ~kill_ex3_i) | ptw_pkt.instr_page_fault_v | ptw_pkt.load_page_fault_v | ptw_pkt.store_page_fault_v | mem_resp.tlb_miss_v | mem_resp.store_page_fault | mem_resp.load_page_fault | mem_resp.store_access_fault | mem_resp.store_misaligned | mem_resp.load_access_fault | mem_resp.load_misaligned;
+assign csr_cmd_v_o = (csr_cmd_v_lo & ~kill_ex3_i);
 
 assign data_o           = csr_data_i;
 assign exc_v_o          = csr_exc_i;

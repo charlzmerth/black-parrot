@@ -7,7 +7,6 @@ module bp_be_csr
     `declare_bp_proc_params(bp_params_p)
 
     , localparam csr_cmd_width_lp = `bp_be_csr_cmd_width
-    , localparam ecode_dec_width_lp = `bp_be_ecode_dec_width
 
     , localparam cfg_bus_width_lp = `bp_cfg_bus_width(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p)
 
@@ -53,10 +52,6 @@ module bp_be_csr
     , output                            translation_en_o
     , output                            mstatus_sum_o
     , output                            mstatus_mxr_o
-    
-    // FE Exceptions
-    , output logic                      itlb_fill_o
-    , output logic                      dtlb_fill_o
     );
 
 // Declare parameterizable structs
@@ -68,7 +63,29 @@ module bp_be_csr
 bp_cfg_bus_s cfg_bus_cast_i;
 bp_be_csr_cmd_s csr_cmd;
 bp_be_csr_cmd_s cfg_bus_csr_cmd_li;
-bp_be_ecode_dec_s exception_ecode_dec_cast_i;
+
+struct packed
+{
+  // RISC-V exceptions
+  logic store_page_fault;
+  logic reserved2;
+  logic load_page_fault;
+  logic instr_page_fault;
+  logic ecall_m_mode;
+  logic reserved1;
+  logic ecall_s_mode;
+  logic ecall_u_mode;
+  logic store_fault;
+  logic store_misaligned;
+  logic load_fault;
+  logic load_misaligned;
+  logic breakpoint;
+  logic illegal_instr;
+  logic instr_fault;
+  logic instr_misaligned;
+}  exception_ecode_dec_cast_i;
+
+
 bp_be_trap_pkt_s trap_pkt_cast_o;
 
 assign cfg_bus_csr_cmd_li.csr_op   = cfg_bus_cast_i.csr_r_v ? e_csrrs : e_csrrw;
@@ -179,27 +196,27 @@ wire [15:0] interrupt_icode_dec_li =
 
 wire ebreak_v_li = is_debug_mode | (is_m_mode & ~dcsr_lo.ebreakm) | (is_s_mode & ~dcsr_lo.ebreaks) | (is_u_mode & ~dcsr_lo.ebreaku);
 assign exception_ecode_dec_cast_i =
-    '{instr_misaligned  : csr_cmd_v_i & (csr_cmd.csr_op == e_op_instr_misaligned)
-      ,instr_fault      : csr_cmd_v_i & (csr_cmd.csr_op == e_op_instr_access_fault)
-      ,illegal_instr    : csr_cmd_v_i & ((csr_cmd.csr_op == e_op_illegal_instr) || illegal_instr_o)
+    '{instr_misaligned  : csr_cmd.exc.instr_misaligned
+      ,instr_fault      : csr_cmd.exc.instr_access_fault
+      ,illegal_instr    : csr_cmd.exc.illegal_instr | illegal_instr_o
       ,breakpoint       : csr_cmd_v_i & (csr_cmd.csr_op == e_ebreak) & ebreak_v_li
-      ,load_misaligned  : csr_cmd_v_i & (csr_cmd.csr_op == e_op_load_misaligned)
-      ,load_fault       : csr_cmd_v_i & (csr_cmd.csr_op == e_op_load_access_fault)
-      ,store_misaligned : csr_cmd_v_i & (csr_cmd.csr_op == e_op_store_misaligned)
-      ,store_fault      : csr_cmd_v_i & (csr_cmd.csr_op == e_op_store_access_fault)
+      ,load_misaligned  : csr_cmd.exc.load_misaligned
+      ,load_fault       : csr_cmd.exc.load_access_fault
+      ,store_misaligned : csr_cmd.exc.store_misaligned
+      ,store_fault      : csr_cmd.exc.store_access_fault
       ,ecall_u_mode     : csr_cmd_v_i & (csr_cmd.csr_op == e_ecall) & (priv_mode_o == `PRIV_MODE_U)
       ,ecall_s_mode     : csr_cmd_v_i & (csr_cmd.csr_op == e_ecall) & (priv_mode_o == `PRIV_MODE_S)
       ,ecall_m_mode     : csr_cmd_v_i & (csr_cmd.csr_op == e_ecall) & (priv_mode_o == `PRIV_MODE_M)
-      ,instr_page_fault : csr_cmd_v_i & (csr_cmd.csr_op == e_op_instr_page_fault)
-      ,load_page_fault  : csr_cmd_v_i & (csr_cmd.csr_op == e_op_load_page_fault)
-      ,store_page_fault : csr_cmd_v_i & (csr_cmd.csr_op == e_op_store_page_fault)
+      ,instr_page_fault : csr_cmd.exc.instr_page_fault
+      ,load_page_fault  : csr_cmd.exc.load_page_fault
+      ,store_page_fault : csr_cmd.exc.store_page_fault
       ,default : '0
       };
 
 logic [3:0] exception_ecode_li;
 logic       exception_ecode_v_li;
 bsg_priority_encode 
- #(.width_p(ecode_dec_width_lp)
+ #(.width_p($bits(exception_ecode_dec_cast_i))
    ,.lo_to_hi_p(1)
    )
  mcause_exception_enc
@@ -211,21 +228,21 @@ bsg_priority_encode
 logic [3:0] m_interrupt_icode_li, s_interrupt_icode_li;
 logic       m_interrupt_icode_v_li, s_interrupt_icode_v_li;
 bsg_priority_encode
- #(.width_p(ecode_dec_width_lp)
+ #(.width_p($bits(exception_ecode_dec_cast_i))
    ,.lo_to_hi_p(1)
    )
  m_interrupt_enc
-  (.i(interrupt_icode_dec_li & ~mideleg_lo[0+:ecode_dec_width_lp] & ecode_dec_width_lp'($signed(mgie)))
+  (.i(interrupt_icode_dec_li & ~mideleg_lo[0+:$bits(exception_ecode_dec_cast_i)] & $bits(exception_ecode_dec_cast_i)'($signed(mgie)))
    ,.addr_o(m_interrupt_icode_li)
    ,.v_o(m_interrupt_icode_v_li)
    );
 
 bsg_priority_encode
- #(.width_p(ecode_dec_width_lp)
+ #(.width_p($bits(exception_ecode_dec_cast_i))
    ,.lo_to_hi_p(1)
    )
  s_interrupt_enc
-  (.i(interrupt_icode_dec_li & mideleg_lo[0+:ecode_dec_width_lp] & ecode_dec_width_lp'($signed(sgie)))
+  (.i(interrupt_icode_dec_li & mideleg_lo[0+:$bits(exception_ecode_dec_cast_i)] & $bits(exception_ecode_dec_cast_i)'($signed(sgie)))
    ,.addr_o(s_interrupt_icode_li)
    ,.v_o(s_interrupt_icode_v_li)
    );
@@ -317,6 +334,7 @@ assign sip_wmask_li    = '{meip: 1'b0, seip: 1'b0
                            };
 
 logic exception_v_o, interrupt_v_o, ret_v_o, sfence_v_o;
+wire csr_cmd_v_li = csr_cmd_v_i | cfg_bus_cast_i.csr_r_v | cfg_bus_cast_i.csr_w_v;
 // CSR data
 always_comb
   begin
@@ -366,201 +384,189 @@ always_comb
     csr_data_lo      = '0;
     sfence_v_o       = '0;
     
-    itlb_fill_o           = '0;
-    dtlb_fill_o           = '0;
+    if (~ebreak_v_li & csr_cmd_v_i & (csr_cmd.csr_op == e_ebreak))
+      begin
+        debug_mode_n   = 1'b1;
+        dpc_li         = paddr_width_p'($signed(exception_pc_i));
+        dcsr_li.cause  = 1; // Ebreak
+        dcsr_li.prv    = priv_mode_r;
+      end
+    else if (csr_cmd_v_i & (csr_cmd.csr_op == e_sfence_vma))
+      begin
+        if (is_s_mode & mstatus_lo.tvm)
+            illegal_instr_o = 1'b1;
+        else
+          begin
+            sfence_v_o = 1'b1;
+          end
+      end
+    else if (csr_cmd_v_i & (csr_cmd.csr_op == e_dret))
+      begin
+        priv_mode_n      = dcsr_lo.prv;
 
-    if (csr_cmd_v_i | cfg_bus_cast_i.csr_r_v | cfg_bus_cast_i.csr_w_v)
-      if (~ebreak_v_li & (csr_cmd.csr_op == e_ebreak))
-        begin
-          debug_mode_n   = 1'b1;
-          dpc_li         = paddr_width_p'($signed(exception_pc_i));
-          dcsr_li.cause  = 1; // Ebreak
-          dcsr_li.prv    = priv_mode_r;
-        end
-      else if (csr_cmd.csr_op == e_sfence_vma)
-        begin
-          if (is_s_mode & mstatus_lo.tvm)
-              illegal_instr_o = 1'b1;
-          else
-            begin
-              sfence_v_o = 1'b1;
-            end
-        end
-      else if (csr_cmd.csr_op == e_dret)
-        begin
-          priv_mode_n      = dcsr_lo.prv;
+        illegal_instr_o  = ~is_debug_mode;
+        ret_v_o          = ~illegal_instr_o;
+      end
+    else if (csr_cmd_v_i & (csr_cmd.csr_op == e_mret))
+      begin
+        if (priv_mode_r < `PRIV_MODE_M)
+          illegal_instr_o = 1'b1;
+        else
+          begin
+            priv_mode_n      = mstatus_lo.mpp;
 
-          illegal_instr_o  = ~is_debug_mode;
-          ret_v_o          = ~illegal_instr_o;
-        end
-      else if (csr_cmd.csr_op == e_mret)
-        begin
-          if (priv_mode_r < `PRIV_MODE_M)
-            illegal_instr_o = 1'b1;
-          else
-            begin
-              priv_mode_n      = mstatus_lo.mpp;
+            mstatus_li.mpp   = `PRIV_MODE_U;
+            mstatus_li.mpie  = 1'b1;
+            mstatus_li.mie   = mstatus_lo.mpie;
+            mstatus_li.mprv  = (priv_mode_n < `PRIV_MODE_M) ? '0 : mstatus_li.mprv;
 
-              mstatus_li.mpp   = `PRIV_MODE_U;
-              mstatus_li.mpie  = 1'b1;
-              mstatus_li.mie   = mstatus_lo.mpie;
-              mstatus_li.mprv  = (priv_mode_n < `PRIV_MODE_M) ? '0 : mstatus_li.mprv;
+            ret_v_o          = 1'b1;
+          end
+      end
+    else if (csr_cmd_v_i & (csr_cmd.csr_op == e_sret))
+      begin
+        if ((is_s_mode & mstatus_lo.tsr) || (priv_mode_r < `PRIV_MODE_S))
+          illegal_instr_o = 1'b1;
+        else
+          begin
+            priv_mode_n      = {1'b0, mstatus_lo.spp};
+            
+            mstatus_li.spp   = `PRIV_MODE_U;
+            mstatus_li.spie  = 1'b1;
+            mstatus_li.sie   = mstatus_lo.spie;
+            mstatus_li.mprv  = (priv_mode_n < `PRIV_MODE_M) ? '0 : mstatus_li.mprv;
 
-              ret_v_o          = 1'b1;
-            end
-        end
-      else if (csr_cmd.csr_op == e_sret)
-        begin
-          if ((is_s_mode & mstatus_lo.tsr) || (priv_mode_r < `PRIV_MODE_S))
-            illegal_instr_o = 1'b1;
-          else
-            begin
-              priv_mode_n      = {1'b0, mstatus_lo.spp};
-              
-              mstatus_li.spp   = `PRIV_MODE_U;
-              mstatus_li.spie  = 1'b1;
-              mstatus_li.sie   = mstatus_lo.spie;
-              mstatus_li.mprv  = (priv_mode_n < `PRIV_MODE_M) ? '0 : mstatus_li.mprv;
-
-              ret_v_o          = 1'b1;
-            end
-        end
-      else if (csr_cmd.csr_op == e_itlb_fill)
-        begin
-          itlb_fill_o = 1'b1;
-        end
-      else if (csr_cmd.csr_op == e_dtlb_fill)
-        begin
-          dtlb_fill_o = 1'b1;
-        end
-      else if (csr_cmd.csr_op == e_wfi)
-        begin
-          illegal_instr_o = mstatus_lo.tw;
-        end
-      else if (csr_cmd.csr_op inside {e_csrrw, e_csrrs, e_csrrc, e_csrrwi, e_csrrsi, e_csrrci})
-        begin
-          // Check for access violations
-          if (is_s_mode & mstatus_lo.tvm & (csr_cmd.csr_addr == `CSR_ADDR_SATP))
-            illegal_instr_o = 1'b1;
-          else if (is_s_mode & (csr_cmd.csr_addr == `CSR_ADDR_CYCLE) & ~mcounteren_lo.cy)
-            illegal_instr_o = 1'b1;
-          else if (is_u_mode & (csr_cmd.csr_addr == `CSR_ADDR_CYCLE) & ~scounteren_lo.cy)
-            illegal_instr_o = 1'b1;
-          else if (is_s_mode & (csr_cmd.csr_addr == `CSR_ADDR_INSTRET) & ~mcounteren_lo.ir)
-            illegal_instr_o = 1'b1;
-          else if (is_u_mode & (csr_cmd.csr_addr == `CSR_ADDR_INSTRET) & ~scounteren_lo.ir)
-            illegal_instr_o = 1'b1;
-          else if (priv_mode_r < csr_cmd.csr_addr[9:8])
-            illegal_instr_o = 1'b1;
-          else
-            begin
-              // Read case
-              unique casez (csr_cmd.csr_addr)
-                `CSR_ADDR_CYCLE  : csr_data_lo = mcycle_lo;
-                // Time must be done by trapping, since we can't stall at this point
-                `CSR_ADDR_INSTRET: csr_data_lo = minstret_lo;
-                // SSTATUS subset of MSTATUS
-                `CSR_ADDR_SSTATUS: csr_data_lo = mstatus_lo & sstatus_rmask_li;
-                // Read-only because we don't support N-extension
-                // Read-only because we don't support N-extension
-                `CSR_ADDR_SEDELEG: csr_data_lo = '0;
-                `CSR_ADDR_SIDELEG: csr_data_lo = '0;
-                `CSR_ADDR_SIE: csr_data_lo = mie_lo & sie_rwmask_li;
-                `CSR_ADDR_STVEC: csr_data_lo = stvec_lo;
-                `CSR_ADDR_SCOUNTEREN: csr_data_lo = scounteren_lo;
-                `CSR_ADDR_SSCRATCH: csr_data_lo = sscratch_lo;
-                `CSR_ADDR_SEPC: csr_data_lo = sepc_lo;
-                `CSR_ADDR_SCAUSE: csr_data_lo = scause_lo;
-                `CSR_ADDR_STVAL: csr_data_lo = stval_lo;
-                // SIP subset of MIP
-                `CSR_ADDR_SIP: csr_data_lo = mip_lo & sip_rmask_li;
-                `CSR_ADDR_SATP: csr_data_lo = satp_lo;
-                // We havr no vendorid currently
-                `CSR_ADDR_MVENDORID: csr_data_lo = '0;
-                // https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
-                //   Lucky 13 (*v*)
-                `CSR_ADDR_MARCHID: csr_data_lo = 64'd13;
-                // 0: Tapeout 0, July 2019
-                // 1: Current
-                `CSR_ADDR_MIMPID: csr_data_lo = 64'd1;
-                `CSR_ADDR_MHARTID: csr_data_lo = hartid_i;
-                `CSR_ADDR_MSTATUS: csr_data_lo = mstatus_lo;
-                // MISA is optionally read-write, but all fields are read-only in BlackParrot
-                //   64 bit MXLEN, AISU extensions
-                `CSR_ADDR_MISA: csr_data_lo = {2'b10, 36'b0, 26'h141101};
-                `CSR_ADDR_MEDELEG: csr_data_lo = medeleg_lo;
-                `CSR_ADDR_MIDELEG: csr_data_lo = mideleg_lo;
-                `CSR_ADDR_MIE: csr_data_lo = mie_lo;
-                `CSR_ADDR_MTVEC: csr_data_lo = mtvec_lo;
-                `CSR_ADDR_MCOUNTEREN: csr_data_lo = mcounteren_lo;
-                `CSR_ADDR_MIP: csr_data_lo = mip_lo;
-                `CSR_ADDR_MSCRATCH: csr_data_lo = mscratch_lo;
-                `CSR_ADDR_MEPC: csr_data_lo = mepc_lo;
-                `CSR_ADDR_MCAUSE: csr_data_lo = mcause_lo;
-                `CSR_ADDR_MTVAL: csr_data_lo = mtval_lo;
-                `CSR_ADDR_PMPCFG0: csr_data_lo = pmpcfg0_lo;
-                `CSR_ADDR_PMPADDR0: csr_data_lo = pmpaddr0_lo;
-                `CSR_ADDR_PMPADDR1: csr_data_lo = pmpaddr1_lo;
-                `CSR_ADDR_PMPADDR2: csr_data_lo = pmpaddr2_lo;
-                `CSR_ADDR_PMPADDR3: csr_data_lo = pmpaddr3_lo;
-                `CSR_ADDR_MCYCLE: csr_data_lo = mcycle_lo;
-                `CSR_ADDR_MINSTRET: csr_data_lo = minstret_lo;
-                `CSR_ADDR_MCOUNTINHIBIT: csr_data_lo = mcountinhibit_lo;
-                `CSR_ADDR_DCSR: csr_data_lo = dcsr_lo;
-                `CSR_ADDR_DPC: csr_data_lo = dpc_lo;
-                default: illegal_instr_o = 1'b1;
-              endcase
-              // Write case
-              unique casez (csr_cmd.csr_addr)
-                `CSR_ADDR_CYCLE  : mcycle_li = csr_data_li;
-                // Time must be done by trapping, since we can't stall at this point
-                `CSR_ADDR_INSTRET: minstret_li = csr_data_li;
-                // SSTATUS subset of MSTATUS
-                `CSR_ADDR_SSTATUS: mstatus_li = (mstatus_lo & ~sstatus_wmask_li) | (csr_data_li & sstatus_wmask_li);
-                // Read-only because we don't support N-extension
-                // Read-only because we don't support N-extension
-                `CSR_ADDR_SEDELEG: begin end
-                `CSR_ADDR_SIDELEG: begin end
-                `CSR_ADDR_SIE: mie_li = (mie_lo & ~sie_rwmask_li) | (csr_data_li & sie_rwmask_li);
-                `CSR_ADDR_STVEC: stvec_li = csr_data_li;
-                `CSR_ADDR_SCOUNTEREN: scounteren_li = csr_data_li;
-                `CSR_ADDR_SSCRATCH: sscratch_li = csr_data_li;
-                `CSR_ADDR_SEPC: sepc_li = csr_data_li;
-                `CSR_ADDR_SCAUSE: scause_li = csr_data_li;
-                `CSR_ADDR_STVAL: stval_li = csr_data_li;
-                // SIP subset of MIP
-                `CSR_ADDR_SIP: mip_li = (mip_lo & ~sip_wmask_li) | (csr_data_li & sip_wmask_li);
-                `CSR_ADDR_SATP: satp_li = csr_data_li;
-                `CSR_ADDR_MVENDORID: begin end
-                `CSR_ADDR_MARCHID: begin end
-                `CSR_ADDR_MIMPID: begin end
-                `CSR_ADDR_MHARTID: begin end
-                `CSR_ADDR_MSTATUS: mstatus_li = csr_data_li;
-                `CSR_ADDR_MISA: begin end
-                `CSR_ADDR_MEDELEG: medeleg_li = csr_data_li;
-                `CSR_ADDR_MIDELEG: mideleg_li = csr_data_li;
-                `CSR_ADDR_MIE: mie_li = csr_data_li;
-                `CSR_ADDR_MTVEC: mtvec_li = csr_data_li;
-                `CSR_ADDR_MCOUNTEREN: mcounteren_li = csr_data_li;
-                `CSR_ADDR_MIP: mip_li = (mip_lo & ~mip_wmask_li) | (csr_data_li & mip_wmask_li);
-                `CSR_ADDR_MSCRATCH: mscratch_li = csr_data_li;
-                `CSR_ADDR_MEPC: mepc_li = csr_data_li;
-                `CSR_ADDR_MCAUSE: mcause_li = csr_data_li;
-                `CSR_ADDR_MTVAL: mtval_li = csr_data_li;
-                `CSR_ADDR_PMPCFG0: pmpcfg0_li = csr_data_li;
-                `CSR_ADDR_PMPADDR0: pmpaddr0_li = csr_data_li;
-                `CSR_ADDR_PMPADDR1: pmpaddr1_li = csr_data_li;
-                `CSR_ADDR_PMPADDR2: pmpaddr2_li = csr_data_li;
-                `CSR_ADDR_PMPADDR3: pmpaddr3_li = csr_data_li;
-                `CSR_ADDR_MCYCLE: mcycle_li = csr_data_li;
-                `CSR_ADDR_MINSTRET: minstret_li = csr_data_li;
-                `CSR_ADDR_MCOUNTINHIBIT: mcountinhibit_li = csr_data_li;
-                `CSR_ADDR_DCSR: dcsr_li = csr_data_li;
-                `CSR_ADDR_DPC: dpc_li = csr_data_li;
-                default: illegal_instr_o = 1'b1;
-              endcase
-            end
-        end
+            ret_v_o          = 1'b1;
+          end
+      end
+    else if (csr_cmd_v_i & (csr_cmd.csr_op == e_wfi))
+      begin
+        illegal_instr_o = mstatus_lo.tw;
+      end
+    else if (csr_cmd_v_i & (csr_cmd.csr_op inside {e_csrrw, e_csrrs, e_csrrc, e_csrrwi, e_csrrsi, e_csrrci}))
+      begin
+        // Check for access violations
+        if (is_s_mode & mstatus_lo.tvm & (csr_cmd.csr_addr == `CSR_ADDR_SATP))
+          illegal_instr_o = 1'b1;
+        else if (is_s_mode & (csr_cmd.csr_addr == `CSR_ADDR_CYCLE) & ~mcounteren_lo.cy)
+          illegal_instr_o = 1'b1;
+        else if (is_u_mode & (csr_cmd.csr_addr == `CSR_ADDR_CYCLE) & ~scounteren_lo.cy)
+          illegal_instr_o = 1'b1;
+        else if (is_s_mode & (csr_cmd.csr_addr == `CSR_ADDR_INSTRET) & ~mcounteren_lo.ir)
+          illegal_instr_o = 1'b1;
+        else if (is_u_mode & (csr_cmd.csr_addr == `CSR_ADDR_INSTRET) & ~scounteren_lo.ir)
+          illegal_instr_o = 1'b1;
+        else if (priv_mode_r < csr_cmd.csr_addr[9:8])
+          illegal_instr_o = 1'b1;
+        else
+          begin
+            // Read case
+            unique casez (csr_cmd.csr_addr)
+              `CSR_ADDR_CYCLE  : csr_data_lo = mcycle_lo;
+              // Time must be done by trapping, since we can't stall at this point
+              `CSR_ADDR_INSTRET: csr_data_lo = minstret_lo;
+              // SSTATUS subset of MSTATUS
+              `CSR_ADDR_SSTATUS: csr_data_lo = mstatus_lo & sstatus_rmask_li;
+              // Read-only because we don't support N-extension
+              // Read-only because we don't support N-extension
+              `CSR_ADDR_SEDELEG: csr_data_lo = '0;
+              `CSR_ADDR_SIDELEG: csr_data_lo = '0;
+              `CSR_ADDR_SIE: csr_data_lo = mie_lo & sie_rwmask_li;
+              `CSR_ADDR_STVEC: csr_data_lo = stvec_lo;
+              `CSR_ADDR_SCOUNTEREN: csr_data_lo = scounteren_lo;
+              `CSR_ADDR_SSCRATCH: csr_data_lo = sscratch_lo;
+              `CSR_ADDR_SEPC: csr_data_lo = sepc_lo;
+              `CSR_ADDR_SCAUSE: csr_data_lo = scause_lo;
+              `CSR_ADDR_STVAL: csr_data_lo = stval_lo;
+              // SIP subset of MIP
+              `CSR_ADDR_SIP: csr_data_lo = mip_lo & sip_rmask_li;
+              `CSR_ADDR_SATP: csr_data_lo = satp_lo;
+              // We havr no vendorid currently
+              `CSR_ADDR_MVENDORID: csr_data_lo = '0;
+              // https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
+              //   Lucky 13 (*v*)
+              `CSR_ADDR_MARCHID: csr_data_lo = 64'd13;
+              // 0: Tapeout 0, July 2019
+              // 1: Current
+              `CSR_ADDR_MIMPID: csr_data_lo = 64'd1;
+              `CSR_ADDR_MHARTID: csr_data_lo = hartid_i;
+              `CSR_ADDR_MSTATUS: csr_data_lo = mstatus_lo;
+              // MISA is optionally read-write, but all fields are read-only in BlackParrot
+              //   64 bit MXLEN, AISU extensions
+              `CSR_ADDR_MISA: csr_data_lo = {2'b10, 36'b0, 26'h141101};
+              `CSR_ADDR_MEDELEG: csr_data_lo = medeleg_lo;
+              `CSR_ADDR_MIDELEG: csr_data_lo = mideleg_lo;
+              `CSR_ADDR_MIE: csr_data_lo = mie_lo;
+              `CSR_ADDR_MTVEC: csr_data_lo = mtvec_lo;
+              `CSR_ADDR_MCOUNTEREN: csr_data_lo = mcounteren_lo;
+              `CSR_ADDR_MIP: csr_data_lo = mip_lo;
+              `CSR_ADDR_MSCRATCH: csr_data_lo = mscratch_lo;
+              `CSR_ADDR_MEPC: csr_data_lo = mepc_lo;
+              `CSR_ADDR_MCAUSE: csr_data_lo = mcause_lo;
+              `CSR_ADDR_MTVAL: csr_data_lo = mtval_lo;
+              `CSR_ADDR_PMPCFG0: csr_data_lo = pmpcfg0_lo;
+              `CSR_ADDR_PMPADDR0: csr_data_lo = pmpaddr0_lo;
+              `CSR_ADDR_PMPADDR1: csr_data_lo = pmpaddr1_lo;
+              `CSR_ADDR_PMPADDR2: csr_data_lo = pmpaddr2_lo;
+              `CSR_ADDR_PMPADDR3: csr_data_lo = pmpaddr3_lo;
+              `CSR_ADDR_MCYCLE: csr_data_lo = mcycle_lo;
+              `CSR_ADDR_MINSTRET: csr_data_lo = minstret_lo;
+              `CSR_ADDR_MCOUNTINHIBIT: csr_data_lo = mcountinhibit_lo;
+              `CSR_ADDR_DCSR: csr_data_lo = dcsr_lo;
+              `CSR_ADDR_DPC: csr_data_lo = dpc_lo;
+              default: illegal_instr_o = 1'b1;
+            endcase
+            // Write case
+            unique casez (csr_cmd.csr_addr)
+              `CSR_ADDR_CYCLE  : mcycle_li = csr_data_li;
+              // Time must be done by trapping, since we can't stall at this point
+              `CSR_ADDR_INSTRET: minstret_li = csr_data_li;
+              // SSTATUS subset of MSTATUS
+              `CSR_ADDR_SSTATUS: mstatus_li = (mstatus_lo & ~sstatus_wmask_li) | (csr_data_li & sstatus_wmask_li);
+              // Read-only because we don't support N-extension
+              // Read-only because we don't support N-extension
+              `CSR_ADDR_SEDELEG: begin end
+              `CSR_ADDR_SIDELEG: begin end
+              `CSR_ADDR_SIE: mie_li = (mie_lo & ~sie_rwmask_li) | (csr_data_li & sie_rwmask_li);
+              `CSR_ADDR_STVEC: stvec_li = csr_data_li;
+              `CSR_ADDR_SCOUNTEREN: scounteren_li = csr_data_li;
+              `CSR_ADDR_SSCRATCH: sscratch_li = csr_data_li;
+              `CSR_ADDR_SEPC: sepc_li = csr_data_li;
+              `CSR_ADDR_SCAUSE: scause_li = csr_data_li;
+              `CSR_ADDR_STVAL: stval_li = csr_data_li;
+              // SIP subset of MIP
+              `CSR_ADDR_SIP: mip_li = (mip_lo & ~sip_wmask_li) | (csr_data_li & sip_wmask_li);
+              `CSR_ADDR_SATP: satp_li = csr_data_li;
+              `CSR_ADDR_MVENDORID: begin end
+              `CSR_ADDR_MARCHID: begin end
+              `CSR_ADDR_MIMPID: begin end
+              `CSR_ADDR_MHARTID: begin end
+              `CSR_ADDR_MSTATUS: mstatus_li = csr_data_li;
+              `CSR_ADDR_MISA: begin end
+              `CSR_ADDR_MEDELEG: medeleg_li = csr_data_li;
+              `CSR_ADDR_MIDELEG: mideleg_li = csr_data_li;
+              `CSR_ADDR_MIE: mie_li = csr_data_li;
+              `CSR_ADDR_MTVEC: mtvec_li = csr_data_li;
+              `CSR_ADDR_MCOUNTEREN: mcounteren_li = csr_data_li;
+              `CSR_ADDR_MIP: mip_li = (mip_lo & ~mip_wmask_li) | (csr_data_li & mip_wmask_li);
+              `CSR_ADDR_MSCRATCH: mscratch_li = csr_data_li;
+              `CSR_ADDR_MEPC: mepc_li = csr_data_li;
+              `CSR_ADDR_MCAUSE: mcause_li = csr_data_li;
+              `CSR_ADDR_MTVAL: mtval_li = csr_data_li;
+              `CSR_ADDR_PMPCFG0: pmpcfg0_li = csr_data_li;
+              `CSR_ADDR_PMPADDR0: pmpaddr0_li = csr_data_li;
+              `CSR_ADDR_PMPADDR1: pmpaddr1_li = csr_data_li;
+              `CSR_ADDR_PMPADDR2: pmpaddr2_li = csr_data_li;
+              `CSR_ADDR_PMPADDR3: pmpaddr3_li = csr_data_li;
+              `CSR_ADDR_MCYCLE: mcycle_li = csr_data_li;
+              `CSR_ADDR_MINSTRET: minstret_li = csr_data_li;
+              `CSR_ADDR_MCOUNTINHIBIT: mcountinhibit_li = csr_data_li;
+              `CSR_ADDR_DCSR: dcsr_li = csr_data_li;
+              `CSR_ADDR_DPC: dpc_li = csr_data_li;
+              default: illegal_instr_o = 1'b1;
+            endcase
+          end
+      end
 
     if (~is_debug_mode & exception_v_i & exception_ecode_v_li)
       begin

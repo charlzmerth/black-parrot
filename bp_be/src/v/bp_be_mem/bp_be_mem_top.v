@@ -174,7 +174,6 @@ logic                     dcache_miss_lo;
 logic                     csr_illegal_instr_lo;
 logic [ptag_width_p-1:0]  satp_ppn_lo;
 logic                     mstatus_sum_lo, mstatus_mxr_lo, translation_en_lo;
-logic                     itlb_fill_lo, dtlb_fill_lo;
 logic [rv64_priv_width_gp-1:0] priv_mode_lo;
 
 logic load_access_fault_v, load_access_fault_mem3, store_access_fault_v, store_access_fault_mem3;
@@ -188,8 +187,8 @@ logic mmu_cmd_v_r, mmu_cmd_v_rr, dtlb_miss_r;
 logic is_store_r, is_store_rr;
 bp_be_mmu_vaddr_s vaddr_mem3;
 
-wire itlb_fill_cmd_v = itlb_fill_lo;
-wire dtlb_fill_cmd_v = dtlb_fill_lo;
+wire itlb_fill_cmd_v = csr_cmd.exc.itlb_miss;
+wire dtlb_fill_cmd_v = csr_cmd.exc.dtlb_miss;
 
 wire is_store = mmu_cmd_v_i & mmu_cmd.mem_op inside {e_sb, e_sh, e_sw, e_sd, e_scw, e_scd};
 
@@ -252,9 +251,6 @@ bp_be_csr
    ,.translation_en_o(translation_en_lo)
    ,.mstatus_sum_o(mstatus_sum_lo)
    ,.mstatus_mxr_o(mstatus_mxr_lo)
-
-   ,.itlb_fill_o(itlb_fill_lo)
-   ,.dtlb_fill_o(dtlb_fill_lo)
    );
 
 bp_tlb

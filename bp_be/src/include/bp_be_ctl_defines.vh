@@ -64,30 +64,13 @@ typedef enum logic [4:0]
   ,e_csrrsi = 5'b00101
   ,e_csrrci = 5'b00110
 
-  // TODO: Separate out CSR op from exceptions based on flag
   ,e_dret       = 5'b10011
   ,e_mret       = 5'b01000
   ,e_sret       = 5'b01001
   ,e_sfence_vma = 5'b01011
   ,e_wfi        = 5'b01100
-
-  // We treat FE exceptions as CSR ops
-  ,e_op_instr_misaligned   = 5'b11011
-  ,e_op_instr_access_fault = 5'b11001
-  ,e_op_illegal_instr      = 5'b11111
-  ,e_ebreak                = 5'b01010
-  ,e_op_load_misaligned    = 5'b10111
-  ,e_op_load_access_fault  = 5'b11101
-  ,e_op_store_misaligned   = 5'b10101
-  ,e_op_store_access_fault = 5'b10001
-  ,e_ecall                 = 5'b00111
-  ,e_op_instr_page_fault   = 5'b11010
-  ,e_op_load_page_fault    = 5'b01111
-  ,e_op_store_page_fault   = 5'b01101
-
-  ,e_op_take_interrupt     = 5'b11000
-  ,e_itlb_fill             = 5'b11100
-  ,e_dtlb_fill             = 5'b11110
+  ,e_ebreak     = 5'b10100
+  ,e_ecall      = 5'b11011
 } bp_be_csr_fu_op_e;
 
 typedef enum logic [4:0]
@@ -173,6 +156,11 @@ typedef struct packed
   bp_be_baddr_e                     baddr_sel;
   bp_be_offset_e                    offset_sel;
   bp_be_result_e                    result_sel;
+
+  logic                             itlb_miss;
+  logic                             instr_access_fault;
+  logic                             instr_page_fault;
+  logic                             illegal_instr;
 }  bp_be_decode_s;
 
 typedef struct packed
@@ -186,28 +174,31 @@ typedef struct packed
   logic reserved1;
   logic ecall_s_mode;
   logic ecall_u_mode;
-  logic store_fault;
+  logic store_access_fault;
   logic store_misaligned;
-  logic load_fault;
+  logic load_access_fault;
   logic load_misaligned;
   logic breakpoint;
   logic illegal_instr;
-  logic instr_fault;
+  logic instr_access_fault;
   logic instr_misaligned;
-}  bp_be_ecode_dec_s;
+
+  // BP exceptions
+  logic fencei;
+  logic dtlb_miss;
+  logic itlb_miss;
+}  bp_be_exception_s;
 
 `define bp_be_ecode_dec_width \
   ($bits(bp_be_ecode_dec_s))
 
 typedef struct packed
 {
-  // BE exceptional conditions
-  logic fe_nop_v;
-  logic be_nop_v;
-  logic me_nop_v;
   logic poison_v;
   logic roll_v;
-}  bp_be_exception_s;
+
+  bp_be_exception_s exc;
+}  bp_be_exc_stage_s;
 
 `define bp_be_fu_op_width                                                                          \
   (`BSG_MAX($bits(bp_be_int_fu_op_e), `BSG_MAX($bits(bp_be_mmu_fu_op_e), $bits(bp_be_csr_fu_op_e))))
@@ -217,6 +208,9 @@ typedef struct packed
 
 `define bp_be_exception_width                                                                      \
   ($bits(bp_be_exception_s))
+
+`define bp_be_exc_stage_width \
+  ($bits(bp_be_exc_stage_s))
 
 `endif
 
