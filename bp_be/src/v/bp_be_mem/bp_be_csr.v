@@ -32,6 +32,7 @@ module bp_be_csr
 
     , input                             exception_v_i
     , input                             ptw_busy_i
+    , input                             long_busy_i
     , input                             fencei_v_i
     , input [vaddr_width_p-1:0]         exception_pc_i
     , input [vaddr_width_p-1:0]         exception_npc_i
@@ -613,7 +614,7 @@ always_comb
       end
     // Don't take interrupts in debug mode or if there's an active PTW or if there's a retiring
     //   instruction
-    else if (~is_debug_mode & ~exception_v_i & ~ptw_busy_i & ~cfg_bus_cast_i.freeze & accept_irq_o)
+    else if (~is_debug_mode & ~exception_v_i & ~ptw_busy_i & ~long_busy_i & ~cfg_bus_cast_i.freeze & accept_irq_o)
       if (~is_debug_mode & m_interrupt_icode_v_li)
         begin
           priv_mode_n          = `PRIV_MODE_M;

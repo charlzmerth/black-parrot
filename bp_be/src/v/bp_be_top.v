@@ -237,6 +237,7 @@ bp_be_mem_top
     ,.mem_resp_v_o(mem_resp_v)
     
     ,.ptw_pkt_o(ptw_pkt)
+    ,.long_busy_i(calc_status.long_busy)
 
     ,.cache_req_complete_i(cache_req_complete_i)   
  

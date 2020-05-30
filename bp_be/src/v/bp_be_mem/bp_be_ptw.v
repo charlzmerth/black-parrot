@@ -53,6 +53,7 @@ module bp_be_ptw
    , output logic                           dcache_v_o
    , output logic [dcache_pkt_width_lp-1:0] dcache_pkt_o
    , output logic [ptag_width_p-1:0]        dcache_ptag_o
+   , output logic                           dcache_ptag_v_o
    , input                                  dcache_rdy_i
    , input                                  dcache_miss_i
   );
@@ -108,6 +109,7 @@ module bp_be_ptw
   
   assign dcache_pkt_o           = dcache_pkt;
   assign dcache_ptag_o          = ppn_r;
+  assign dcache_ptag_v_o        = (state_r == eWaitLoad);
   assign dcache_data            = dcache_data_r;
   
   assign tlb_w_v_o              = (state_r == eWriteBack);

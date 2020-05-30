@@ -71,6 +71,7 @@ module bp_be_mem_top
    , output                                  mem_resp_v_o
 
    , output [ptw_pkt_width_lp-1:0]           ptw_pkt_o
+   , input                                   long_busy_i
 
    // D$-LCE Interface
    // signals to LCE
@@ -152,6 +153,7 @@ bp_pte_entry_leaf_s      dtlb_r_entry, dtlb_w_entry;
 
 /* PTW ports */
 logic [ptag_width_p-1:0]  ptw_dcache_ptag;
+logic                     ptw_dcache_ptag_v;
 logic                     ptw_dcache_v, ptw_busy;
 bp_be_dcache_pkt_s        ptw_dcache_pkt;
 logic                     ptw_tlb_w_v, ptw_itlb_not_dtlb;
@@ -164,7 +166,7 @@ bp_be_dcache_pkt_s        dcache_pkt;
 logic [dword_width_p-1:0] dcache_data;
 logic [ptag_width_p-1:0]  dcache_ptag;
 logic                     dcache_v, dcache_fencei_v, dcache_pkt_v;
-logic                     dcache_tlb_miss, dcache_poison;
+logic                     dcache_tlb_miss;
 logic                     dcache_uncached;
 logic                     dcache_ready_lo;
 logic                     dcache_miss_lo;
@@ -232,6 +234,7 @@ bp_be_csr
 
    ,.exception_v_i(exception_v_li)
    ,.ptw_busy_i(ptw_busy)
+   ,.long_busy_i(long_busy_i)
    ,.exception_pc_i(exception_pc_li)
    ,.exception_npc_i(exception_npc_li)
    ,.exception_vaddr_i(exception_vaddr_li)
@@ -318,6 +321,7 @@ bp_be_ptw
    ,.dcache_v_o(ptw_dcache_v)
    ,.dcache_pkt_o(ptw_dcache_pkt)
    ,.dcache_ptag_o(ptw_dcache_ptag)
+   ,.dcache_ptag_v_o(ptw_dcache_ptag_v)
    ,.dcache_rdy_i(dcache_ready_lo) 
    ,.dcache_miss_i(dcache_miss_lo)
   );
@@ -355,7 +359,7 @@ bp_be_dcache
 
     ,.load_op_tl_o(load_op_tl_lo)
     ,.store_op_tl_o(store_op_tl_lo)
-    ,.poison_i(dcache_poison)
+    ,.poison_i(chk_poison_ex_i)
 
     // D$-LCE Interface
     ,.dcache_miss_o(dcache_miss_lo)
@@ -420,23 +424,22 @@ assign dcache_cmd_v    = mmu_cmd_v_i;
 assign fencei_cmd_v    = mmu_cmd_v_i & (mmu_cmd.mem_op == e_fencei);
 
 // D-Cache connections
-assign dcache_ptag     = (ptw_busy)? ptw_dcache_ptag : dtlb_r_entry.ptag;
-assign dcache_tlb_miss = (ptw_busy)? 1'b0 : dtlb_miss_v;
-assign dcache_poison   = (ptw_busy)? 1'b0 : chk_poison_ex_i
-                                            | (load_page_fault_v | store_page_fault_v)
-                                            | (load_access_fault_v | store_access_fault_v);
-assign dcache_pkt_v    = (ptw_busy)? ptw_dcache_v : dcache_cmd_v;
-
 always_comb
   begin
     if(ptw_busy) begin
-      dcache_pkt = ptw_dcache_pkt;
+      dcache_pkt_v    = ptw_dcache_v;
+      dcache_pkt      = ptw_dcache_pkt;
+      dcache_tlb_miss = ~ptw_dcache_ptag_v;
+      dcache_ptag     = ptw_dcache_ptag;
     end
     else begin
+      dcache_pkt_v           = dcache_cmd_v;
       // We assume that mem op == dcache op
       dcache_pkt.opcode      = bp_be_dcache_opcode_e'(mmu_cmd.mem_op);
       dcache_pkt.page_offset = {mmu_cmd.vaddr.index, mmu_cmd.vaddr.offset};
       dcache_pkt.data        = mmu_cmd.data;
+      dcache_tlb_miss        = dtlb_miss_v;
+      dcache_ptag            = dtlb_r_entry.ptag;
     end
 end
 
