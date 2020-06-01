@@ -221,7 +221,7 @@ always_comb
         irf_rs1 = regOutThree;
         irf_rs2 = regOutFour;
       end
-    if (0)
+    if (fetch_instr == 7'b0100000)
       begin
         contactInstruction = 1;
       end
