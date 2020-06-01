@@ -199,17 +199,19 @@ logic [dword_width_p-1:0] regOutTwo;
 logic [dword_width_p-1:0] regOutThree;
 logic [dword_width_p-1:0] regOutFour;
 
-always@(posedge clk_i) 
-  begin
+always@(posedge clk_i) begin 
+  if (reset_i)
+    contactAfterFlip <= 0;
+  else
     contactAfterFlip <= contactAfterFlip ^ contactInstruction;
-  end
+end
 
 assign contactWriteOne = !contactAfterFlip & wb_pkt.rd_w_v;
 assign contactWriteTwo = contactAfterFlip & wb_pkt.rd_w_v;
 
 always_comb
   begin
-    if (contractAfterFlip)
+    if (~contactAfterFlip)
       begin
         irf_rs1 = regOutOne;
         irf_rs2 = regOutTwo;
@@ -219,7 +221,7 @@ always_comb
         irf_rs1 = regOutThree;
         irf_rs2 = regOutFour;
       end
-    if (fetch_instr.opcode == 7'b1111111)
+    if (0)
       begin
         contactInstruction = 1;
       end
@@ -253,7 +255,7 @@ bp_be_regfile
 
 bp_be_regfile
 #(.bp_params_p(bp_params_p))
- int_regfile
+ int_regfile_duplicate
   (.clk_i(clk_i)
    ,.reset_i(reset_i)
 
